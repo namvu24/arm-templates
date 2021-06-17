@@ -1,0 +1,182 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "containerGroupsName": {
+      "type": "string"
+    },
+    "acrName": {
+      "type": "string",
+      "defaultValue":"<default-arc-name>"
+    },
+    "imageName": {
+      "type": "string"
+    },
+    "imageRegistryUsername": {
+      "type": "string"
+    },
+    "imageRegistryPwd": {
+      "type": "securestring"
+    },
+    "saPwd": {
+      "type": "securestring"
+    },
+    "storageAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_GRS",
+        "Standard_ZRS",
+        "Standard_RAGRS"
+      ],
+      "metadata": {
+        "description": "Storage Account type"
+      }
+    },
+    "storageAccountName": {
+      "type": "string",
+      "defaultValue":"<default-storage-acc-name>"
+    },
+    "storageAccountKind": {
+      "type": "string",
+      "defaultValue":"StorageV2"
+    },
+    "storageAccountTier": {
+      "type": "string",
+      "defaultValue": "Hot"
+    },
+    "fileShareName": {
+      "type": "string",
+      "defaultValue": "data"
+    }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+    "storageAccountId": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ContainerInstance/containerGroups",
+      "apiVersion": "2021-03-01",
+      "name": "[parameters('containerGroupsName')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts/fileServices/shares', parameters('storageAccountName'), 'default', parameters('fileShareName'))]",
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "sku": "Standard",
+        "containers": [
+          {
+            "name": "[parameters('containerGroupsName')]",
+            "properties": {
+              "image": "[parameters('imageName')]",
+              "ports": [
+                {
+                  "protocol": "TCP",
+                  "port": 1433
+                }
+              ],
+              "environmentVariables": [
+                {
+                  "name": "SA_PASSWORD",
+                  "securevalue": "[parameters('saPwd')]"
+                },
+                {
+                  "name": "ACCEPT_EULA",
+                  "value": "Y"
+                }
+              ],
+              "resources": {
+                "requests": {
+                  "memoryInGB": 8,
+                  "cpu": 4
+                }
+              },
+              "volumeMounts": [
+                {
+                  "name": "azurefileshare",
+                  "mountPath": "/mnt/external"
+                }
+              ]
+            }
+          }
+        ],
+        "initContainers": [],
+        "imageRegistryCredentials": [
+          {
+            "server": "[parameters('acrName')]",
+            "username": "[parameters('imageRegistryUsername')]",
+            "password": "[parameters('imageRegistryPwd')]"
+          }
+        ],
+        "restartPolicy": "Never",
+        "osType": "Linux",
+        "ipAddress": {
+          "type": "Public",
+          "ports": [
+            {
+                "protocol": "tcp",
+                "port": 1433
+            }
+          ]
+        },
+        "volumes": [
+          {
+            "name": "azurefileshare",
+            "azureFile": {
+              "shareName": "[parameters('fileShareName')]",
+              "storageAccountName": "[parameters('storageAccountName')]",
+              "storageAccountKey": "[listKeys(variables('storageAccountId'), '2019-04-01').keys[0].value]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[parameters('storageAccountName')]",
+      "apiVersion": "2019-06-01",
+      "location": "[variables('location')]",
+      "kind": "[parameters('storageAccountKind')]",
+      "sku": {
+        "name": "[parameters('storageAccountType')]"
+      },
+      "properties": {
+        "allowBlobPublicAccess": false,
+        "supportsHttpsTrafficOnly": true,
+        "accessTier": "[parameters('storageAccountTier')]"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), '/default/', parameters('fileShareName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "defaultEncryptionScope": "$account-encryption-key",
+        "denyEncryptionScopeOverride": false,
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/fileServices/shares",
+      "apiVersion": "2021-04-01",
+      "name": "[concat(parameters('storageAccountName'), '/default/', parameters('fileShareName'))]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+          "accessTier": "TransactionOptimized",
+          "shareQuota": 5120,
+          "enabledProtocols": "SMB"
+      }
+    }
+  ]
+}
